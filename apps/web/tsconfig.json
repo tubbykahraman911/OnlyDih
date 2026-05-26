@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "moduleResolution": "Bundler",
+    "incremental": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"]
+}
+

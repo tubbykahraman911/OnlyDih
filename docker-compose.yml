@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: sizeai
+      POSTGRES_USER: sizeai
+      POSTGRES_PASSWORD: sizeai_dev
+    volumes:
+      - sizeai_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - sizeai_redis:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://sizeai:sizeai_dev@postgres:5432/sizeai?schema=public
+      REDIS_URL: redis://redis:6379
+      # Required for real auth/payments/analyzer processing; set in your local .env before running
+      # SUPABASE_URL:
+      # SUPABASE_SERVICE_ROLE_KEY:
+      # STRIPE_SECRET_KEY:
+      # STRIPE_WEBHOOK_SECRET:
+      # R2_ACCOUNT_ID:
+      # R2_ACCESS_KEY_ID:
+      # R2_SECRET_ACCESS_KEY:
+      # R2_BUCKET_NAME:
+      # AI_SERVICE_URL: http://ai-service:8000
+    depends_on:
+      - postgres
+      - redis
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: apps/ai-service/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      HF_TOKEN: ""
+      MODEL_DIR: ./models
+      MAX_IMAGE_MB: 8
+
+volumes:
+  sizeai_postgres:
+  sizeai_redis:
+
