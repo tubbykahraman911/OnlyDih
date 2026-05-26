@@ -123,6 +123,11 @@ model User {
 
   blockedBy Block[] @relation("blocker")
   blocking  Block[] @relation("blocked")
+
+  mediaOwned Media[] @relation("media_owner")
+  subscriptionsAsFan Subscription[] @relation("subscriptions_fan")
+  subscriptionsAsCreator Subscription[] @relation("subscriptions_creator")
+  reportsFiled Report[] @relation("reports_reporter")
 }
 
 model CreatorProfile {
@@ -203,13 +208,15 @@ model Post {
 
   // Lightweight “trending” heuristic can reference this later
   likesCount Int @default(0)
+
+  purchases Purchase[]
 }
 
 model Media {
   id String @id @default(cuid())
 
   ownerId String @db.Uuid
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   User   @relation("media_owner", fields: [ownerId], references: [id], onDelete: Cascade)
 
   postId String?
   post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
@@ -349,8 +356,10 @@ model ChatMessage {
   body String
 
   // If this message includes media, store it in Media (private R2 key)
-  attachmentMediaId String?
+  attachmentMediaId String? @unique
   attachmentMedia Media? @relation(fields: [attachmentMediaId], references: [id], onDelete: SetNull)
+
+  purchases Purchase[]
 
   // Paid unlock for PPV content in chat
   ppvUnlockPriceCents Int?
@@ -377,7 +386,7 @@ model Report {
   id String @id @default(cuid())
 
   reporterId String @db.Uuid
-  reporter User @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter User @relation("reports_reporter", fields: [reporterId], references: [id], onDelete: Cascade)
 
   targetUserId String? @db.Uuid
   postId String?
