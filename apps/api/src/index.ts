@@ -4,64 +4,71 @@ import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
 import { z } from "zod";
-import { healthRouter } from "./routes/health.js";
-import { meRouter } from "./routes/me.js";
-import { ageRouter } from "./routes/age.js";
+import { authRouter } from "./routes/auth.js";
+import { verificationRouter } from "./routes/verification.js";
 import { uploadsRouter } from "./routes/uploads.js";
-import { mediaRouter } from "./routes/media.js";
-import { stripeRouter, stripeWebhookHandler } from "./routes/stripe.js";
-import { socialRouter } from "./routes/social.js";
-import { chatRouter } from "./routes/chat.js";
-import { analyzerRouter } from "./routes/analyzer.js";
-import { moderationRouter } from "./routes/moderation.js";
+import { analysisRouter } from "./routes/analysis.js";
+import { profileRouter } from "./routes/profile.js";
+import { privacyRouter } from "./routes/privacy.js";
+import { safetyRouter } from "./routes/safety.js";
+import { healthRouter } from "./routes/health.js";
+import { requireAuth, requireCsrf } from "./middleware/auth.js";
+import { deleteExpiredRawUploads, startAnalysisWorker } from "./lib/analysisQueue.js";
 
 dotenv.config();
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(8080),
-  SUPABASE_URL: z.string().min(1).optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-  STRIPE_SECRET_KEY: z.string().min(1).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
-  AI_SERVICE_URL: z.string().min(1).optional()
+  APP_BASE_URL: z.string().default("http://localhost:3000"),
+  SESSION_SECRET: z.string().min(24).default("dev-session-secret-change-before-production")
 });
 
-type Env = z.infer<typeof envSchema>;
-const env: Env = envSchema.parse(process.env);
-
+const env = envSchema.parse(process.env);
 const app = express();
 
 app.disable("x-powered-by");
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        connectSrc: ["'self'", env.APP_BASE_URL],
+        frameAncestors: ["'none'"]
+      }
+    }
+  })
+);
 app.use(
   cors({
-    origin: true,
+    origin: env.APP_BASE_URL,
     credentials: true
   })
 );
 app.use(morgan("tiny"));
+app.use(express.json({ limit: "1mb" }));
 
-// Stripe webhooks require the RAW body to validate the signature.
-app.post("/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.get("/healthz", (_req, res) => res.json({ ok: true, phase: "phase_1_private_only" }));
 
-app.use(express.json({ limit: "2mb" }));
+app.use("/api/health", healthRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/verification", verificationRouter);
+app.use("/api/uploads", requireAuth, requireCsrf, uploadsRouter);
+app.use("/api/analysis", requireAuth, requireCsrf, analysisRouter);
+app.use("/api/profile", requireAuth, profileRouter);
+app.use("/api/privacy", requireAuth, requireCsrf, privacyRouter);
+app.use("/api/safety", requireAuth, requireCsrf, safetyRouter);
 
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
-app.use("/health", healthRouter);
-app.use("/me", meRouter);
-app.use("/age", ageRouter);
-app.use("/uploads", uploadsRouter);
-app.use("/media", mediaRouter);
-app.use("/stripe", stripeRouter);
-app.use("/", socialRouter);
-app.use("/chats", chatRouter);
-app.use("/analyzer", analyzerRouter);
-app.use("/", moderationRouter);
+app.use((_err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const message = process.env.NODE_ENV === "production" ? "Request failed" : "Request failed";
+  return res.status(500).json({ error: { message } });
+});
 
 app.use((_req, res) => res.status(404).json({ error: { message: "Not found" } }));
 
-app.listen(env.PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`[api] listening on :${env.PORT}`);
-});
+startAnalysisWorker();
+setInterval(() => void deleteExpiredRawUploads(), 1000 * 60 * 60).unref();
 
+app.listen(env.PORT, () => {
+  console.log(`[api] OnlyDihs private Phase 1 API listening on :${env.PORT}`);
+});

@@ -1,5 +1,5 @@
 {
-  "name": "sizeai",
+  "name": "onlydihs",
   "private": true,
   "packageManager": "pnpm@9.12.0",
   "workspaces": [
@@ -11,17 +11,23 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter @onlydihs/api exec prisma generate",
+    "db:migrate": "pnpm --filter @onlydihs/api exec prisma migrate dev",
+    "db:studio": "pnpm --filter @onlydihs/api exec prisma studio",
+    "db:push": "pnpm --filter @onlydihs/api exec prisma db push"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
     "@eslint/js": "^9.7.0",
+    "@next/eslint-plugin-next": "15.1.6",
     "@typescript-eslint/eslint-plugin": "^8.17.0",
     "@typescript-eslint/parser": "^8.17.0",
     "eslint": "^9.7.0",
     "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
     "prettier": "^3.3.3",
+    "turbo": "^2.3.3",
     "typescript": "^5.6.3"
   }
 }
-

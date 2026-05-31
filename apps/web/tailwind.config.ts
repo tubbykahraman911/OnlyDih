@@ -6,7 +6,7 @@ const config: Config = {
   theme: {
     extend: {
       boxShadow: {
-        glow: "0 0 0 1px rgba(255,255,255,0.06), 0 0 30px rgba(168,85,247,0.10)"
+        glow: "0 0 0 1px rgba(254,254,254,0.07), 0 18px 50px rgba(244,175,176,0.12), 0 0 36px rgba(215,179,85,0.08)"
       }
     }
   },

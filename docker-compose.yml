@@ -4,18 +4,41 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: sizeai
-      POSTGRES_USER: sizeai
-      POSTGRES_PASSWORD: sizeai_dev
+      POSTGRES_DB: onlydihs
+      POSTGRES_USER: onlydihs
+      POSTGRES_PASSWORD: onlydihs_dev
     volumes:
-      - sizeai_postgres:/var/lib/postgresql/data
+      - onlydihs_postgres:/var/lib/postgresql/data
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
     volumes:
-      - sizeai_redis:/data
+      - onlydihs_redis:/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: local-dev-access-key
+      MINIO_ROOT_PASSWORD: local-dev-secret-key
+    volumes:
+      - onlydihs_minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 local-dev-access-key local-dev-secret-key; do sleep 2; done;
+      mc mb -p local/onlydihs-private || true;
+      mc anonymous set none local/onlydihs-private;
+      "
 
   api:
     build:
@@ -25,21 +48,24 @@ services:
       - "8080:8080"
     environment:
       PORT: 8080
-      DATABASE_URL: postgresql://sizeai:sizeai_dev@postgres:5432/sizeai?schema=public
+      DATABASE_URL: postgresql://onlydihs:onlydihs_dev@postgres:5432/onlydihs?schema=public
       REDIS_URL: redis://redis:6379
-      # Required for real auth/payments/analyzer processing; set in your local .env before running
-      # SUPABASE_URL:
-      # SUPABASE_SERVICE_ROLE_KEY:
-      # STRIPE_SECRET_KEY:
-      # STRIPE_WEBHOOK_SECRET:
-      # R2_ACCOUNT_ID:
-      # R2_ACCESS_KEY_ID:
-      # R2_SECRET_ACCESS_KEY:
-      # R2_BUCKET_NAME:
-      # AI_SERVICE_URL: http://ai-service:8000
+      # Required for private object storage and verification; set real values before running.
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: onlydihs-private
+      S3_ACCESS_KEY_ID: local-dev-access-key
+      S3_SECRET_ACCESS_KEY: local-dev-secret-key
+      SESSION_SECRET: replace-with-at-least-24-random-characters
+      VERIFICATION_PROVIDER_API_KEY: placeholder
+      VERIFICATION_WEBHOOK_SECRET: replace-with-webhook-secret
+      APP_BASE_URL: http://localhost:3000
+      RAW_UPLOAD_RETENTION_HOURS: 24
     depends_on:
       - postgres
       - redis
+      - minio
+      - minio-init
 
   ai-service:
     build:
@@ -53,6 +79,7 @@ services:
       MAX_IMAGE_MB: 8
 
 volumes:
-  sizeai_postgres:
-  sizeai_redis:
+  onlydihs_postgres:
+  onlydihs_redis:
+  onlydihs_minio:
 

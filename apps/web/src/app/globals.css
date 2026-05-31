@@ -2,15 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-champagne: #c5986f;
+  --brand-blush: #f4afb0;
+  --brand-gold: #d7b355;
+  --brand-white: #fefefe;
+  --brand-night: #110d0c;
+}
+
 html,
 body {
   height: 100%;
 }
 
 body {
-  background: radial-gradient(1200px circle at 20% 0%, rgba(168,85,247,0.18), transparent 40%),
-    radial-gradient(900px circle at 70% 10%, rgba(34,211,238,0.16), transparent 45%),
-    #05040a;
-  color: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(180deg, #110d0c 0%, #15110f 48%, #110d0c 100%);
+  color: rgba(254, 254, 254, 0.94);
+}
+
+::selection {
+  background: rgba(244, 175, 176, 0.32);
+  color: var(--brand-white);
 }
 

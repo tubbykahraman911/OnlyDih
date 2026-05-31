@@ -1,303 +1,195 @@
-import io
-from typing import Any, Dict, Optional
+import os
+from typing import Literal, Optional
 
 import cv2
 import numpy as np
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, HttpUrl
 
-app = FastAPI(title="SizeAI Analyzer Service")
+app = FastAPI(title="OnlyDihs Phase 1 Private Analyzer Service")
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_MB", "8")) * 1024 * 1024
 
 
 class AnalyzeRequest(BaseModel):
-    jobId: str = Field(min_length=3, max_length=128)
-    consented: bool = Field(...)
-    downloadUrl: HttpUrl
-    autoDeleteAfterProcessing: bool = False
+    job_id: str = Field(min_length=3, max_length=128)
+    consented: bool
+    image_url: HttpUrl
+    calibration_object_present: bool = False
 
 
-class AnalyzeResponse(BaseModel):
-    jobId: str
-    status: str
-    overallScore: Optional[int] = None
-    percentile: Optional[int] = None
-    label: Optional[str] = None
-    confidence: Optional[float] = None
-    feedback: Optional[Dict[str, str]] = None
-    radar: Optional[Dict[str, int]] = None
-    aiSummary: Optional[str] = None
-    csamCheck: Optional[Dict[str, Any]] = None
+class AnalyzerOutput(BaseModel):
+    length_score: int
+    girth_score: int
+    skin_clarity_score: int
+    presentation_score: int
+    picture_quality_score: int
+    confidence_score: int
+    total_score: float
+    confidence_level: Literal["low", "medium", "high"]
+    warnings: list[str]
 
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "service": "sizeai-ai-service"}
+    return {"ok": True, "service": "onlydihs-phase1-private-analyzer"}
 
 
-def clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
-    return max(lo, min(hi, x))
+def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return max(low, min(high, value))
 
 
-def to_int_score(x: float) -> int:
-    return int(round(clamp(x)))
+def score(value: float) -> int:
+    return int(round(clamp(value)))
 
 
-def label_for_score(score: int) -> str:
-    if score >= 96:
-        return "Mythic Tier"
-    if score >= 81:
-        return "Engineered"
-    if score >= 66:
-        return "Above Average"
-    if score >= 46:
-        return "Balanced Build"
-    return "Compact King"
+def weighted_total(output: dict[str, int]) -> float:
+    return round(
+        output["length_score"] * 0.35
+        + output["girth_score"] * 0.30
+        + output["skin_clarity_score"] * 0.15
+        + output["presentation_score"] * 0.10
+        + output["picture_quality_score"] * 0.05
+        + output["confidence_score"] * 0.05,
+        2,
+    )
 
 
-def download_image_bytes(url: str) -> bytes:
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    return r.content
+def confidence_level(confidence_score: int) -> Literal["low", "medium", "high"]:
+    if confidence_score >= 70:
+        return "high"
+    if confidence_score >= 45:
+        return "medium"
+    return "low"
 
 
-def load_image(b: bytes) -> np.ndarray:
-    arr = np.frombuffer(b, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image")
-    return img
+def fetch_image(url: str) -> np.ndarray:
+    response = requests.get(url, timeout=20, stream=True)
+    response.raise_for_status()
+    content_length = int(response.headers.get("content-length", 0))
+    if content_length and content_length > MAX_IMAGE_BYTES:
+        raise ValueError("Image exceeds upload limit")
+    body = response.content
+    if len(body) > MAX_IMAGE_BYTES:
+        raise ValueError("Image exceeds upload limit")
+    return load_image(body)
 
 
-def resize_for_analysis(img: np.ndarray, max_dim: int = 900) -> np.ndarray:
-    h, w = img.shape[:2]
-    m = max(h, w)
-    if m <= max_dim:
-        return img
-    scale = max_dim / float(m)
-    nh = int(round(h * scale))
-    nw = int(round(w * scale))
-    return cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+def load_image(body: bytes) -> np.ndarray:
+    if len(body) > MAX_IMAGE_BYTES:
+        raise ValueError("Image exceeds upload limit")
+    image = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Image format could not be decoded")
+    height, width = image.shape[:2]
+    if max(height, width) > 1024:
+        ratio = 1024 / float(max(height, width))
+        image = cv2.resize(image, (int(width * ratio), int(height * ratio)), interpolation=cv2.INTER_AREA)
+    return image
 
 
-def score_quality(gray: np.ndarray) -> Dict[str, float]:
-    # Blur (variance of Laplacian)
-    blur_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-    blur_score = clamp((blur_var - 30.0) / 220.0 * 100.0)
-
-    mean = float(np.mean(gray))
-    exposure_score = clamp(100.0 - abs(mean - 120.0) * 0.7)
-
-    std = float(np.std(gray))
-    contrast_score = clamp((std / 60.0) * 100.0)
-
-    photo_quality = 0.45 * blur_score + 0.3 * exposure_score + 0.25 * contrast_score
-    return {
-        "blur_score": float(blur_score),
-        "exposure_score": float(exposure_score),
-        "contrast_score": float(contrast_score),
-        "photo_quality": float(photo_quality),
-    }
-
-
-def segment_silhouette(img: np.ndarray) -> Dict[str, Any]:
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Otsu threshold tends to separate subject from background reasonably for MVP.
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Heuristic: treat smaller foreground as subject.
-    if float(np.mean(thresh) / 255.0) > 0.55:
-        thresh = 255 - thresh
-
+def foreground_bbox(gray: np.ndarray) -> Optional[tuple[int, int, int, int, float]]:
+    _, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if float(np.mean(threshold)) / 255.0 > 0.55:
+        threshold = 255 - threshold
     kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    mask = cv2.morphologyEx(threshold, cv2.MORPH_OPEN, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        return {"mask": mask, "bbox": None, "area": 0.0, "sil_mask": None}
-
-    largest = max(contours, key=cv2.contourArea)
-    area = float(cv2.contourArea(largest))
-    x, y, w, h = cv2.boundingRect(largest)
-    if w < 10 or h < 10:
-        return {"mask": mask, "bbox": None, "area": area, "sil_mask": None}
-
-    sil_mask = mask[y : y + h, x : x + w]
-    return {"mask": mask, "bbox": (x, y, w, h), "area": area, "sil_mask": sil_mask}
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    area = float(cv2.contourArea(contour))
+    if area < 2500:
+        return None
+    x, y, width, height = cv2.boundingRect(contour)
+    return x, y, width, height, area
 
 
-def score_shape(img: np.ndarray, sil_mask: np.ndarray, bbox: tuple) -> Dict[str, float]:
-    x, y, w, h = bbox
-    # Length: based on silhouette aspect ratio (orientation-agnostic)
-    aspect = max(float(h), float(w)) / (max(1.0, min(float(h), float(w))) + 1e-6)
-    length_score = clamp((aspect - 1.1) / 5.0 * 100.0)
+def analyze_image(image: np.ndarray, calibration_object_present: bool) -> AnalyzerOutput:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image_height, image_width = gray.shape[:2]
+    sharpness = clamp((cv2.Laplacian(gray, cv2.CV_64F).var() - 25.0) / 210.0 * 100.0)
+    exposure = clamp(100.0 - abs(float(np.mean(gray)) - 122.0) * 0.75)
+    contrast = clamp(float(np.std(gray)) / 58.0 * 100.0)
+    picture_quality = score(0.46 * sharpness + 0.30 * exposure + 0.24 * contrast)
 
-    # Girth: based on fill ratio within bbox.
-    bbox_area = float(w * h)
-    sil_area = float(np.sum(sil_mask > 0))
-    fill_ratio = sil_area / (bbox_area + 1e-6)
-    girth_score = clamp(fill_ratio * 160.0)
+    bbox = foreground_bbox(gray)
+    warnings = [
+        "Private visual estimate only.",
+        "No exact measurement is claimed without a calibration object or known reference scale.",
+    ]
+    if bbox is None:
+        base = {
+            "length_score": 0,
+            "girth_score": 0,
+            "skin_clarity_score": 0,
+            "presentation_score": 0,
+            "picture_quality_score": picture_quality,
+            "confidence_score": 10,
+        }
+        warnings.append("Image quality or framing was too limited for a reliable visual estimate.")
+        return AnalyzerOutput(**base, total_score=weighted_total(base), confidence_level="low", warnings=warnings)
 
-    # Symmetry: compare left/right of resized mask
-    resized = cv2.resize(sil_mask, (64, 64), interpolation=cv2.INTER_NEAREST)
-    left = (resized[:, :32] > 0).astype(np.float32)
-    right = (np.fliplr(resized[:, 32:]) > 0).astype(np.float32)
-    diff = float(np.mean(np.abs(left - right)))
-    symmetry_score = clamp((1.0 - diff) * 100.0)
+    x, y, box_width, box_height, area = bbox
+    crop_gray = gray[y : y + box_height, x : x + box_width]
+    coverage = area / float(image_height * image_width)
+    aspect = box_height / max(1, box_width)
 
-    return {
-        "length": float(length_score),
-        "girth": float(girth_score),
-        "symmetry": float(symmetry_score),
+    length_visual = score(42 + clamp(aspect, 0.6, 4.0) * 12)
+    girth_visual = score(42 + clamp(box_width / max(1, image_width), 0.05, 0.55) * 80)
+    skin_clarity = score(100.0 - min(80.0, float(np.std(crop_gray)) * 1.15))
+    presentation = score(100.0 - abs(coverage - 0.38) * 170.0)
+    confidence = score((picture_quality * 0.45) + (min(100.0, coverage * 180.0) * 0.35) + (20 if calibration_object_present else 0))
+
+    if not calibration_object_present:
+        confidence = min(confidence, 45)
+        warnings.append("Confidence is capped because no calibration object or known reference scale was provided.")
+
+    base = {
+        "length_score": length_visual,
+        "girth_score": girth_visual,
+        "skin_clarity_score": skin_clarity,
+        "presentation_score": presentation,
+        "picture_quality_score": picture_quality,
+        "confidence_score": confidence,
     }
+    return AnalyzerOutput(
+        **base,
+        total_score=weighted_total(base),
+        confidence_level=confidence_level(confidence),
+        warnings=warnings,
+    )
 
 
-def score_skin_and_presentation(img: np.ndarray, sil_mask: np.ndarray, bbox: tuple) -> Dict[str, float]:
-    x, y, w, h = bbox
-    # Skin clarity proxy: how "consistent" the intensity is inside the silhouette.
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    L = lab[:, :, 0]
-
-    crop_L = L[y : y + h, x : x + w]
-    inside = crop_L[sil_mask > 0]
-    if inside.size < 50:
-        skin_std = 999.0
-    else:
-        skin_std = float(np.std(inside))
-
-    skin_score = clamp(100.0 - skin_std * 1.2)
-
-    # Presentation/grooming proxy: edge density outside silhouette should be lower.
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-
-    crop_edges = edges[y : y + h, x : x + w]
-    outside = crop_edges[sil_mask == 0]
-    inside_edges = crop_edges[sil_mask > 0]
-
-    outside_density = float(np.mean(outside > 0)) if outside.size else 1.0
-    inside_density = float(np.mean(inside_edges > 0)) if inside_edges.size else 0.0
-
-    # Penalize background clutter; slight reward for crisp edges on subject.
-    presentation_score = clamp(100.0 - outside_density * 180.0 + inside_density * 20.0)
-
-    return {"skin": float(skin_score), "presentation": float(presentation_score)}
-
-
-@app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest):
-    if not req.consented:
-        raise HTTPException(status_code=400, detail="Consent required for analysis.")
-
+@app.post("/analyze", response_model=AnalyzerOutput)
+def analyze(request: AnalyzeRequest):
+    if not request.consented:
+        raise HTTPException(status_code=400, detail="Consent is required.")
     try:
-        img_bytes = download_image_bytes(str(req.downloadUrl))
-        img = load_image(img_bytes)
-        img = resize_for_analysis(img)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not load image: {e}")
+        image = fetch_image(str(request.image_url))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except requests.RequestException as error:
+        raise HTTPException(status_code=400, detail=f"Could not retrieve private image: {error}")
+    return analyze_image(image, request.calibration_object_present)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape[:2]
 
-    quality = score_quality(gray)
-
-    # Basic quality gate (entertainment; not medical)
-    if quality["blur_score"] < 10.0 or min(h, w) < 256:
-        return AnalyzeResponse(
-            jobId=req.jobId,
-            status="rejected_low_quality",
-            feedback={
-                "humor": "This photo is giving 'camera is sprinting' energy. Retake with steadier focus.",
-                "confidence": "Low confidence due to blur / low detail. Entertainment-only scoring."
-            },
-            radar={
-                "Length": 0,
-                "Girth": 0,
-                "Symmetry": 0,
-                "Skin clarity": 0,
-                "Presentation": 0,
-                "Photo quality": to_int_score(quality["photo_quality"])
-            },
-            csamCheck={"status": "not_run_placeholder"}
-        )
-
-    seg = segment_silhouette(img)
-    bbox = seg.get("bbox")
-    sil_mask = seg.get("sil_mask")
-    area = float(seg.get("area") or 0.0)
-
-    if bbox is None or sil_mask is None or area < 2500:
-        return AnalyzeResponse(
-            jobId=req.jobId,
-            status="rejected_unreadable",
-            feedback={
-                "humor": "I couldn't clearly read the shape. Your camera might be staging a plot twist.",
-                "confidence": "Low confidence due to unreadable silhouette. Entertainment-only."
-            },
-            radar={
-                "Length": 0,
-                "Girth": 0,
-                "Symmetry": 0,
-                "Skin clarity": 0,
-                "Presentation": 0,
-                "Photo quality": to_int_score(quality["photo_quality"])
-            },
-            csamCheck={"status": "not_run_placeholder"}
-        )
-
-    shape_scores = score_shape(img, sil_mask, bbox)
-    # Crop skin/presentation uses the same crop region assumption as sil_mask.
-    skin_pres = score_skin_and_presentation(img, sil_mask, bbox)
-
-    radar = {
-        "Length": to_int_score(shape_scores["length"]),
-        "Girth": to_int_score(shape_scores["girth"]),
-        "Symmetry": to_int_score(shape_scores["symmetry"]),
-        "Skin clarity": to_int_score(skin_pres["skin"]),
-        "Presentation": to_int_score(skin_pres["presentation"]),
-        "Photo quality": to_int_score(quality["photo_quality"]),
-    }
-
-    # Weighted entertainment score
-    overall = (
-        radar["Length"] * 0.40
-        + radar["Girth"] * 0.35
-        + radar["Symmetry"] * 0.10
-        + radar["Skin clarity"] * 0.05
-        + radar["Presentation"] * 0.05
-        + radar["Photo quality"] * 0.05
-    )
-    overall_int = int(round(clamp(overall)))
-
-    label = label_for_score(overall_int)
-
-    # Confidence oriented (not clinical)
-    seg_conf = clamp(20.0 + (shape_scores["symmetry"] * 0.3) + (area / (float(h * w) + 1e-6)) * 80.0)
-    photo_conf = clamp(quality["photo_quality"] * 0.9)
-    confidence = float(clamp(0.25 + 0.55 * (photo_conf / 100.0) + 0.2 * (seg_conf / 100.0), 0.0, 1.0))
-
-    percentile = int(max(1, min(99, round(overall_int + (photo_conf - 50.0) / 6.0))))
-
-    humor = (
-        f"{label} vibes detected. Entertainment-only confidence scoring, not medical advice."
-    )
-
-    # Confidence-oriented feedback
-    confidence_text = f"Confidence: {int(confidence * 100)}%. This is a playful visual read—your mileage may vary."
-
-    ai_summary = f"Overall score: {overall_int}/100. Label: {label}. {confidence_text}"
-
-    return AnalyzeResponse(
-        jobId=req.jobId,
-        status="completed",
-        overallScore=overall_int,
-        percentile=percentile,
-        label=label,
-        confidence=round(confidence, 2),
-        feedback={"humor": humor, "confidence": confidence_text},
-        radar=radar,
-        aiSummary=ai_summary,
-        csamCheck={"status": "not_run_placeholder"}
-    )
-
+@app.post("/analyze-upload", response_model=AnalyzerOutput)
+async def analyze_upload(
+    file: UploadFile = File(...),
+    job_id: str = Form(..., min_length=3, max_length=128),
+    consented: bool = Form(...),
+    calibration_object_present: bool = Form(False),
+):
+    if not job_id:
+        raise HTTPException(status_code=400, detail="Job id is required.")
+    if not consented:
+        raise HTTPException(status_code=400, detail="Consent is required.")
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+    try:
+        image = load_image(await file.read())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return analyze_image(image, calibration_object_present)

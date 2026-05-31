@@ -7,462 +7,182 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  FAN
-  CREATOR
-  ADMIN
+enum VerificationState {
+  pending
+  verified
+  failed
+  expired
 }
 
-enum Visibility {
-  PUBLIC
-  SUBSCRIBERS
-  PPV
-  STORY
-  HIGHLIGHT
+enum UploadStatus {
+  pending
+  processing
+  completed
+  failed
+  deleted
+  quarantined
 }
 
-enum BadgeLevel {
-  BASIC
-  VERIFIED
-  ELITE
+enum ModerationState {
+  pending
+  approved
+  rejected
+  escalated
 }
 
-enum ModerationStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  FLAGGED
+enum SafetyFlagStatus {
+  open
+  reviewing
+  resolved
 }
 
-enum CsamCheckStatus {
-  NOT_RUN
-  CLEAN
-  FLAGGED
-}
-
-enum SubscriptionStatus {
-  INCOMPLETE
-  ACTIVE
-  PAST_DUE
-  CANCELED
-  UNPAID
-}
-
-enum PurchaseStatus {
-  PENDING
-  SUCCEEDED
-  CANCELED
-  REFUNDED
-}
-
-enum TipStatus {
-  PENDING
-  SUCCEEDED
-  CANCELED
-  REFUNDED
-}
-
-enum ReportStatus {
-  OPEN
-  RESOLVED
-}
-
-enum AnalyzerJobStatus {
-  QUEUED
-  RUNNING
-  COMPLETED
-  FAILED
-}
-
-enum NotificationType {
-  LIKE
-  COMMENT
-  SUBSCRIPTION
-  MESSAGE
-  TIP
-  SYSTEM
+enum DeletionStatus {
+  requested
+  processing
+  completed
+  failed
 }
 
 model User {
-  id String @id @db.Uuid
+  id           String    @id @default(cuid())
+  email        String    @unique
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
 
-  email      String?
-  handle     String? @unique
-  role       Role @default(FAN)
-  isBanned   Boolean @default(false)
-
-  ageVerifiedAt DateTime?
-  consentedAt   DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  creatorProfile CreatorProfile?
-
-  following Follow[] @relation("follows_creator")
-  followers Follow[] @relation("follows_follower")
-
-  creatorPosts Post[] @relation("creator_posts")
-  comments Comment[]
-  likes Like[]
-
-  purchasesAsBuyer  Purchase[] @relation("purchases_buyer")
-  purchasesAsSeller Purchase[] @relation("purchases_seller")
-  tipsAsBuyer Tip[] @relation("tips_buyer")
-  tipsAsSeller Tip[] @relation("tips_seller")
-
-  notifications Notification[]
-
-  analyzerJobs AnalyzerJob[]
-
-  threadsCreatedAsCreator ChatThread[] @relation("threads_creator")
-  threadsCreatedAsFan ChatThread[] @relation("threads_fan")
-
-  sentMessages ChatMessage[] @relation("chat_messages_sender")
-  receivedMessages ChatMessage[] @relation("chat_messages_recipient")
-
-  blockedBy Block[] @relation("blocker")
-  blocking  Block[] @relation("blocked")
-
-  mediaOwned Media[] @relation("media_owner")
-  subscriptionsAsFan Subscription[] @relation("subscriptions_fan")
-  subscriptionsAsCreator Subscription[] @relation("subscriptions_creator")
-  reportsFiled Report[] @relation("reports_reporter")
+  sessions             Session[]
+  verificationStatuses VerificationStatus[]
+  consentEvents        ConsentEvent[]
+  uploads              Upload[]
+  analysisResults      AnalysisResult[]
+  safetyFlags          SafetyFlag[]
+  auditLogs            AuditLog[]
+  deletionRequests     DeletionRequest[]
 }
 
-model CreatorProfile {
-  userId String @id @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  csrfTokenHash String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 
-  bio String?
-  badgeLevel BadgeLevel @default(BASIC)
-
-  subscriptionPriceCents Int @default(0)
-
-  categoriesOnProfile CreatorCategory[]
-
-  stripeConnectAccountId String? @unique
-  payoutEnabled          Boolean @default(true)
-
-  verifiedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@index([userId])
+  @@index([expiresAt])
 }
 
-model Category {
-  id String @id @default(cuid())
-  name String @unique
-  slug String @unique
+model VerificationStatus {
+  id                     String            @id @default(cuid())
+  userId                 String
+  user                   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider               String
+  providerVerificationId String            @unique
+  status                 VerificationState @default(pending)
+  ageOver18Confirmed     Boolean           @default(false)
+  verifiedAt             DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
-  creators CreatorCategory[]
-
-  createdAt DateTime @default(now())
+  @@index([userId, status])
 }
 
-model CreatorCategory {
-  creatorId  String @db.Uuid
-  categoryId String
+model ConsentEvent {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId           String   @unique
+  upload             Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  consentTextVersion String
+  ipAddressHash      String
+  userAgentHash      String
+  createdAt          DateTime @default(now())
 
-  creator CreatorProfile @relation(fields: [creatorId], references: [userId], onDelete: Cascade)
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@id([creatorId, categoryId])
-  @@index([categoryId])
+  @@index([userId])
 }
 
-model Follow {
-  followerId String @db.Uuid
-  creatorId  String @db.Uuid
+model Upload {
+  id               String          @id @default(cuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storageKey       String          @unique
+  originalFilename String
+  mimeType         String
+  fileSize         Int
+  status           UploadStatus    @default(pending)
+  moderationStatus ModerationState @default(pending)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
 
-  follower User @relation("follows_follower", fields: [followerId], references: [id], onDelete: Cascade)
-  creator  User @relation("follows_creator", fields: [creatorId], references: [id], onDelete: Cascade)
+  consentEvent   ConsentEvent?
+  analysisResult AnalysisResult?
+  safetyFlags    SafetyFlag[]
 
-  createdAt DateTime @default(now())
-
-  @@unique([followerId, creatorId])
-  @@index([creatorId])
+  @@index([userId, status])
+  @@index([createdAt])
 }
 
-model Post {
-  id String @id @default(cuid())
+model AnalysisResult {
+  id                  String    @id @default(cuid())
+  uploadId            String    @unique
+  upload              Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lengthScore         Int
+  girthScore          Int
+  skinClarityScore    Int
+  presentationScore   Int
+  pictureQualityScore Int
+  confidenceScore     Int
+  totalScore          Float
+  confidenceLevel     String
+  warningsJson        Json
+  createdAt           DateTime  @default(now())
+  deletedAt           DateTime?
 
-  creatorId String @db.Uuid
-  creator   User   @relation("creator_posts", fields: [creatorId], references: [id], onDelete: Cascade)
-
-  text String?
-  visibility Visibility @default(PUBLIC)
-  ppvPriceCents Int?
-
-  scheduledAt DateTime?
-  publishedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  media Media[]
-  likes Like[]
-  comments Comment[]
-
-  // Lightweight “trending” heuristic can reference this later
-  likesCount Int @default(0)
-
-  purchases Purchase[]
+  @@index([userId, deletedAt])
 }
 
-model Media {
-  id String @id @default(cuid())
-
-  ownerId String @db.Uuid
-  owner   User   @relation("media_owner", fields: [ownerId], references: [id], onDelete: Cascade)
-
-  postId String?
-  post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
-
-  r2Key String @unique
-  mimeType String?
-  sizeBytes BigInt?
-  width Int?
-  height Int?
-  durationSec Float?
-  hash String?
-
-  isAdult Boolean @default(false)
-  moderationStatus ModerationStatus @default(PENDING)
-  csamCheckStatus  CsamCheckStatus  @default(NOT_RUN)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  chatMessage ChatMessage?
-  analyzerJobs AnalyzerJob[]
-}
-
-model Like {
-  postId String
-  userId String @db.Uuid
-
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@id([postId, userId])
-}
-
-model Comment {
-  id String @id @default(cuid())
-  postId String
-  userId String @db.Uuid
-  text String
-
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@index([postId])
-}
-
-model Subscription {
-  id String @id @default(cuid())
-
-  fanId String @db.Uuid
-  creatorId String @db.Uuid
-
-  fan User @relation("subscriptions_fan", fields: [fanId], references: [id], onDelete: Cascade)
-  creator User @relation("subscriptions_creator", fields: [creatorId], references: [id], onDelete: Cascade)
-
-  stripeSubscriptionId String @unique
-  status SubscriptionStatus @default(INCOMPLETE)
-  currentPeriodEnd DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([creatorId])
-}
-
-model Purchase {
-  id String @id @default(cuid())
-
-  buyerId String @db.Uuid
-  sellerId String @db.Uuid
-
-  buyer User @relation("purchases_buyer", fields: [buyerId], references: [id], onDelete: Cascade)
-  seller User @relation("purchases_seller", fields: [sellerId], references: [id], onDelete: Cascade)
-
-  postId String?
-  post Post? @relation(fields: [postId], references: [id], onDelete: SetNull)
-
-  chatMessageId String?
-  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
-
-  stripePaymentIntentId String @unique
-  amountCents Int
-  status PurchaseStatus @default(PENDING)
-
-  createdAt DateTime @default(now())
-}
-
-model Tip {
-  id String @id @default(cuid())
-
-  buyerId String @db.Uuid
-  sellerId String @db.Uuid
-
-  buyer User @relation("tips_buyer", fields: [buyerId], references: [id], onDelete: Cascade)
-  seller User @relation("tips_seller", fields: [sellerId], references: [id], onDelete: Cascade)
-
-  stripePaymentIntentId String @unique
-  amountCents Int
-  status TipStatus @default(PENDING)
-
-  createdAt DateTime @default(now())
-
-  @@index([sellerId])
-}
-
-model ChatThread {
-  id String @id @default(cuid())
-
-  creatorId String @db.Uuid
-  fanId String @db.Uuid
-
-  creator User @relation("threads_creator", fields: [creatorId], references: [id], onDelete: Cascade)
-  fan User @relation("threads_fan", fields: [fanId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  messages ChatMessage[]
-
-  @@unique([creatorId, fanId])
-}
-
-model ChatMessage {
-  id String @id @default(cuid())
-
-  threadId String
-  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-
-  senderId String @db.Uuid
-  recipientId String @db.Uuid
-
-  sender User @relation("chat_messages_sender", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient User @relation("chat_messages_recipient", fields: [recipientId], references: [id], onDelete: Cascade)
-
-  body String
-
-  // If this message includes media, store it in Media (private R2 key)
-  attachmentMediaId String? @unique
-  attachmentMedia Media? @relation(fields: [attachmentMediaId], references: [id], onDelete: SetNull)
-
-  purchases Purchase[]
-
-  // Paid unlock for PPV content in chat
-  ppvUnlockPriceCents Int?
-  // Unlock is represented by a successful `Purchase` row linked via `Purchase.chatMessageId`.
-  // This keeps the schema unambiguous and avoids multi-relation confusion.
-
-  createdAt DateTime @default(now())
-}
-
-model Notification {
-  id String @id @default(cuid())
-
-  userId String @db.Uuid
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  type NotificationType
-  payload Json
-  readAt DateTime?
-
-  createdAt DateTime @default(now())
-}
-
-model Report {
-  id String @id @default(cuid())
-
-  reporterId String @db.Uuid
-  reporter User @relation("reports_reporter", fields: [reporterId], references: [id], onDelete: Cascade)
-
-  targetUserId String? @db.Uuid
-  postId String?
-  messageId String?
-  mediaId String?
-
-  reason String
-  status ReportStatus @default(OPEN)
-
-  resolvedAt DateTime?
-  resolvedById String? @db.Uuid
-
-  createdAt DateTime @default(now())
-}
-
-model Block {
-  blockerId String @db.Uuid
-  blockedId String @db.Uuid
-
-  blocker User @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-  blocked User @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@id([blockerId, blockedId])
-}
-
-model AnalyzerJob {
-  id String @id @default(cuid())
-
-  userId String @db.Uuid
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  mediaId String?
-  media Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-
-  status AnalyzerJobStatus @default(QUEUED)
-
-  consentedAt DateTime?
-  autoDeleteAfterProcessing Boolean @default(false)
-
-  settings Json
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  result AnalyzerResult?
-}
-
-model AnalyzerResult {
-  id String @id @default(cuid())
-
-  jobId String @unique
-  job AnalyzerJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  overallScore Int
-  percentile Int
-  label String
-  confidence Float?
-  radar Json
-  feedback Json
-  aiSummary String
-
-  createdAt DateTime @default(now())
+model SafetyFlag {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId  String?
+  upload    Upload?          @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+  flagType  String
+  severity  String
+  status    SafetyFlagStatus @default(open)
+  notes     String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([uploadId])
 }
 
 model AuditLog {
-  id String @id @default(cuid())
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action       String
+  metadataJson Json?
+  createdAt    DateTime @default(now())
 
-  adminId String? @db.Uuid
-  action String
-  entity String
-  entityId String?
-  ip String?
-  metadata Json?
-
-  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+  @@index([action])
 }
 
+model DeletionRequest {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      DeletionStatus @default(requested)
+  requestedAt DateTime       @default(now())
+  completedAt DateTime?
+
+  @@index([userId, status])
+}

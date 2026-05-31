@@ -1,5 +1,7 @@
 node_modules
 .next
+.next-dev
+.turbo
 dist
 build
 coverage
@@ -9,4 +11,7 @@ coverage
 !.env.example
 *.log
 pnpm-lock.yaml
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
 
