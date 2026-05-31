@@ -13,6 +13,10 @@ function csrfFromCookie() {
     ?.slice("od_csrf=".length) ?? null;
 }
 
+export function getCsrfToken() {
+  return csrfToken ?? csrfFromCookie();
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
@@ -28,6 +32,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     method,
     headers,
     credentials: "include"
+  }).catch(() => {
+    throw { message: `Could not reach the API at ${apiBaseUrl}. Confirm the API server is running.` } satisfies ApiClientError;
   });
   const json = (await response.json().catch(() => ({}))) as any;
   if (!response.ok) throw { message: json?.error?.message ?? "Request failed" } satisfies ApiClientError;

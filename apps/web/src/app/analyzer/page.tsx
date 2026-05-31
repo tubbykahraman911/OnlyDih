@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PhaseShell, Panel } from "../../components/PhaseShell";
-import { apiFetch } from "../../lib/apiClient";
+import { apiFetch, getCsrfToken } from "../../lib/apiClient";
 import { isUnauthorized } from "../../lib/authRedirect";
 
 const consentLabels = {
@@ -16,6 +16,7 @@ const consentLabels = {
 
 type ConsentKey = keyof typeof consentLabels;
 type UploadState = { upload?: { id: string; status: string; moderationStatus: string }; result?: { id: string } | null };
+type PresignResponse = { uploadId: string; uploadUrl: string; uploadMode?: "local" | "s3" };
 
 export default function AnalyzerPage() {
   const router = useRouter();
@@ -59,12 +60,31 @@ export default function AnalyzerPage() {
     setBusy(true);
     setError(null);
     try {
-      const presign = await apiFetch<{ uploadId: string; uploadUrl: string }>("/api/uploads/presign", {
+      const presign = await apiFetch<PresignResponse>("/api/uploads/presign", {
         method: "POST",
         body: JSON.stringify({ originalFilename: file.name, mimeType: file.type, fileSize: file.size })
       });
-      const put = await fetch(presign.uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      if (!put.ok) throw new Error("Private storage upload failed");
+      const uploadHeaders = new Headers({ "Content-Type": file.type });
+      if (presign.uploadMode === "local") {
+        const token = getCsrfToken();
+        if (token) uploadHeaders.set("x-csrf-token", token);
+      }
+      const put = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: uploadHeaders,
+        credentials: presign.uploadMode === "local" ? "include" : "omit"
+      }).catch(() => {
+        throw new Error(
+          presign.uploadMode === "local"
+            ? "Could not reach the local upload endpoint. Confirm the API server is running."
+            : "Could not reach private object storage. Storage may not be configured for local development."
+        );
+      });
+      if (!put.ok) {
+        const details = (await put.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(details?.error?.message ?? "Private storage upload failed");
+      }
       await apiFetch("/api/uploads/complete", {
         method: "POST",
         body: JSON.stringify({ uploadId: presign.uploadId, consent })

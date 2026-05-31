@@ -43,8 +43,17 @@ analysisRouter.get("/:id", requireAuth, rateLimit("analysis_fetch", 120, 60), as
 
   const upload = await prisma.upload.findFirst({
     where: { id: req.params.id, userId: req.user!.id, deletedAt: null },
-    select: { id: true, status: true, moderationStatus: true, originalFilename: true, createdAt: true }
+    select: {
+      id: true,
+      status: true,
+      moderationStatus: true,
+      originalFilename: true,
+      createdAt: true,
+      analysisResult: {
+        where: { deletedAt: null }
+      }
+    }
   });
   if (!upload) return res.status(404).json({ error: { message: "Analysis not found" } });
-  return res.json({ result: null, upload });
+  return res.json({ result: upload.analysisResult, upload: { ...upload, analysisResult: undefined } });
 });

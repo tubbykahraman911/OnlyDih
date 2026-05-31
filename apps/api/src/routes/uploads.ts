@@ -4,7 +4,15 @@ import { prisma } from "../db/prisma.js";
 import { auditActions, auditLog } from "../lib/audit.js";
 import { enqueueAnalysis } from "../lib/analysisQueue.js";
 import { hashRequestValue, randomToken } from "../lib/crypto.js";
-import { createPresignedUploadUrl, deletePrivateObject } from "../lib/storage.js";
+import {
+  canUseLocalUploadFallback,
+  createPresignedUploadUrl,
+  deletePrivateObject,
+  isPrivateStorageConfigured,
+  readRequestBody,
+  saveLocalPrivateObject,
+  StorageConfigurationError
+} from "../lib/storage.js";
 import { requireAuth } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
@@ -40,6 +48,11 @@ uploadsRouter.post("/presign", requireAuth, rateLimit("uploads_presign", 20, 60 
 
   const extension = parsed.data.originalFilename.split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") ?? "img";
   const storageKey = `private/${req.user!.id}/${randomToken(18)}.${extension}`;
+
+  if (process.env.NODE_ENV === "production" && !isPrivateStorageConfigured()) {
+    return res.status(503).json({ error: { message: "Private object storage is not configured." } });
+  }
+
   const upload = await prisma.upload.create({
     data: {
       userId: req.user!.id,
@@ -49,9 +62,51 @@ uploadsRouter.post("/presign", requireAuth, rateLimit("uploads_presign", 20, 60 
       fileSize: parsed.data.fileSize
     }
   });
-  const uploadUrl = await createPresignedUploadUrl(storageKey, parsed.data.mimeType);
-  await auditLog(req.user!.id, auditActions.uploadCreated, { uploadId: upload.id, mimeType: upload.mimeType, fileSize: upload.fileSize });
-  return res.json({ uploadId: upload.id, uploadUrl, expiresInSeconds: 300 });
+
+  try {
+    const uploadUrl = canUseLocalUploadFallback()
+      ? `${req.protocol}://${req.get("host")}/api/uploads/local/${upload.id}`
+      : await createPresignedUploadUrl(storageKey, parsed.data.mimeType);
+    await auditLog(req.user!.id, auditActions.uploadCreated, { uploadId: upload.id, mimeType: upload.mimeType, fileSize: upload.fileSize });
+    return res.json({
+      uploadId: upload.id,
+      uploadUrl,
+      expiresInSeconds: canUseLocalUploadFallback() ? 900 : 300,
+      uploadMode: canUseLocalUploadFallback() ? "local" : "s3"
+    });
+  } catch (error) {
+    await prisma.upload.update({ where: { id: upload.id }, data: { status: "failed", deletedAt: new Date() } });
+    if (error instanceof StorageConfigurationError) {
+      return res.status(503).json({ error: { message: error.message } });
+    }
+    return res.status(500).json({ error: { message: "Could not create private upload URL." } });
+  }
+});
+
+uploadsRouter.put("/local/:id", requireAuth, rateLimit("uploads_local_put", 20, 60 * 60), async (req, res) => {
+  if (!canUseLocalUploadFallback()) {
+    return res.status(404).json({ error: { message: "Local upload fallback is not enabled." } });
+  }
+  if (!(await requireVerified(req.user!.id))) {
+    return res.status(403).json({ error: { message: "18+ verification is required before uploading" } });
+  }
+
+  const upload = await prisma.upload.findFirst({ where: { id: req.params.id, userId: req.user!.id, deletedAt: null } });
+  if (!upload) return res.status(404).json({ error: { message: "Upload not found" } });
+  if (!allowedImageTypes.has(req.header("content-type")?.split(";")[0] ?? "")) {
+    return res.status(400).json({ error: { message: "Unsupported image file" } });
+  }
+
+  try {
+    const body = await readRequestBody(req, maxFileSize);
+    if (body.length !== upload.fileSize) {
+      return res.status(400).json({ error: { message: "Uploaded file size does not match the requested upload." } });
+    }
+    await saveLocalPrivateObject(upload.storageKey, body);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(400).json({ error: { message: error instanceof Error ? error.message : "Local upload failed." } });
+  }
 });
 
 uploadsRouter.post("/complete", requireAuth, rateLimit("uploads_complete", 20, 60 * 60), async (req, res) => {
