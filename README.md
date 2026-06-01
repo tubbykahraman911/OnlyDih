@@ -31,8 +31,12 @@ S3_BUCKET=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 SESSION_SECRET=
+VERIFICATION_PROVIDER=placeholder
 VERIFICATION_PROVIDER_API_KEY=
 VERIFICATION_WEBHOOK_SECRET=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_IDENTITY_RETURN_URL=
 APP_BASE_URL=
 RAW_UPLOAD_RETENTION_HOURS=24
 NEXT_PUBLIC_API_BASE_URL=
@@ -65,6 +69,22 @@ curl -X POST http://localhost:8080/api/verification/webhook \
 ```
 
 Uploads remain blocked unless the latest verification status is `verified` and `ageOver18Confirmed` is true.
+
+## Stripe Identity
+
+Set `VERIFICATION_PROVIDER=stripe`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` to use Stripe Identity for new verification sessions. If `VERIFICATION_PROVIDER=stripe` is set but either Stripe secret is missing, the API fails clearly at startup instead of silently falling back to the placeholder provider.
+
+`STRIPE_IDENTITY_RETURN_URL` controls where Stripe redirects the browser after the hosted verification flow. If it is omitted, the API falls back to `${APP_BASE_URL}/verification`.
+
+`VERIFICATION_WEBHOOK_SECRET` is only for the placeholder development webhook at `/api/verification/webhook`. Stripe webhooks use `STRIPE_WEBHOOK_SECRET` at `/api/verification/stripe-webhook`.
+
+Stripe webhooks must be forwarded to:
+
+```bash
+stripe listen --forward-to http://127.0.0.1:8080/api/verification/stripe-webhook
+```
+
+Copy the resulting `whsec_...` value into `apps/api/.env` as `STRIPE_WEBHOOK_SECRET`, then restart the API. The app does not store government ID images or DOB; DOB is used only transiently in the webhook handler to confirm whether the verified person is 18+.
 
 ## Analyzer Contract
 

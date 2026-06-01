@@ -7,7 +7,10 @@ import { PhaseShell, Panel } from "../../components/PhaseShell";
 import { apiFetch } from "../../lib/apiClient";
 import { isUnauthorized } from "../../lib/authRedirect";
 
-type VerificationStatus = { status: string; verification?: { providerVerificationId: string; provider: string } | null };
+type VerificationStatus = {
+  status: "pending" | "pending_age_review" | "verified" | "failed" | "expired";
+  verification?: { providerVerificationId: string; provider: string; ageOver18Confirmed: boolean } | null;
+};
 
 export default function VerificationPage() {
   const router = useRouter();
@@ -20,8 +23,12 @@ export default function VerificationPage() {
   }
 
   async function start() {
-    const response = await apiFetch<{ verificationId: string; verificationUrl: string }>("/api/verification/start", { method: "POST" });
-    setMessage(`Placeholder session created: ${response.verificationId}. In development, send the verification webhook to mark it verified.`);
+    const response = await apiFetch<{ provider: string; verificationId: string; verificationUrl: string }>("/api/verification/start", { method: "POST" });
+    if (response.verificationUrl) {
+      window.location.href = response.verificationUrl;
+      return;
+    }
+    setMessage(`Verification session created: ${response.verificationId}.`);
     await load();
   }
 
@@ -32,7 +39,23 @@ export default function VerificationPage() {
     });
   }, [router]);
 
-  const verified = status?.status === "verified";
+  useEffect(() => {
+    if (!status || !["pending", "pending_age_review"].includes(status.status)) return;
+    const timer = window.setInterval(() => {
+      void load().catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
+  const verified = status?.status === "verified" && status.verification?.ageOver18Confirmed === true;
+  const statusMessage =
+    status?.status === "pending_age_review"
+      ? "Your identity check was received, but age confirmation needs review before uploads unlock."
+      : status?.status === "failed"
+        ? "Verification could not be completed. Start a new session to try again."
+        : status?.status === "expired"
+          ? "Verification expired or was canceled. Start a new session to try again."
+          : null;
 
   return (
     <PhaseShell>
@@ -43,6 +66,7 @@ export default function VerificationPage() {
           <p className="mt-4 text-zinc-300">
             Current status: <span className="font-semibold text-white">{status?.status ?? "loading"}</span>
           </p>
+          {statusMessage && <p className="mt-3 rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{statusMessage}</p>}
           <div className="mt-6 flex flex-wrap gap-3">
             {!verified && (
               <button onClick={() => void start()} className="rounded-md bg-emerald-300 px-4 py-2 text-sm font-semibold text-zinc-950">

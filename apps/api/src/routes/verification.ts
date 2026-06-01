@@ -1,8 +1,15 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
+import type Stripe from "stripe";
 import { z } from "zod";
 import { prisma } from "../db/prisma.js";
 import { auditActions, auditLog } from "../lib/audit.js";
-import { startPlaceholderVerification, verifyWebhookSignature } from "../lib/verificationProvider.js";
+import {
+  calculateAge,
+  constructStripeWebhookEvent,
+  startVerificationSession,
+  verifyWebhookSignature
+} from "../lib/verificationProvider.js";
 import { requireAuth, requireCsrf } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
@@ -17,7 +24,7 @@ verificationRouter.get("/status", requireAuth, async (req, res) => {
 });
 
 verificationRouter.post("/start", requireAuth, requireCsrf, rateLimit("verification_start", 8, 60 * 60), async (req, res) => {
-  const session = await startPlaceholderVerification(req.user!.id);
+  const session = await startVerificationSession(req.user!);
   const verification = await prisma.verificationStatus.create({
     data: {
       userId: req.user!.id,
@@ -27,7 +34,11 @@ verificationRouter.post("/start", requireAuth, requireCsrf, rateLimit("verificat
       ageOver18Confirmed: false
     }
   });
-  return res.json({ verificationId: verification.providerVerificationId, verificationUrl: session.verificationUrl });
+  return res.json({
+    provider: verification.provider,
+    verificationId: verification.providerVerificationId,
+    verificationUrl: session.verificationUrl
+  });
 });
 
 const webhookSchema = z.object({
@@ -60,3 +71,78 @@ verificationRouter.post("/webhook", rateLimit("verification_webhook", 60, 60), a
   });
   return res.json({ ok: true });
 });
+
+function dobFromVerifiedOutputs(session: Stripe.Identity.VerificationSession) {
+  const dob = session.verified_outputs?.dob;
+  if (!dob?.year || !dob.month || !dob.day) return null;
+  return { year: dob.year, month: dob.month, day: dob.day };
+}
+
+async function updateStripeVerification(session: Stripe.Identity.VerificationSession, status: "verified" | "failed" | "expired" | "pending_age_review", auditReason: string) {
+  const verification = await prisma.verificationStatus.findUnique({
+    where: { providerVerificationId: session.id }
+  });
+  if (!verification || verification.provider !== "stripe") return;
+
+  const stripeUserId = session.client_reference_id ?? session.metadata?.userId;
+  if (stripeUserId !== verification.userId) {
+    await auditLog(verification.userId, auditActions.verificationUpdate, {
+      provider: "stripe",
+      status: "failed",
+      reason: "stripe_user_mismatch"
+    });
+    await prisma.verificationStatus.update({
+      where: { id: verification.id },
+      data: { status: "failed", ageOver18Confirmed: false, verifiedAt: null }
+    });
+    return;
+  }
+
+  await prisma.verificationStatus.update({
+    where: { id: verification.id },
+    data: {
+      status,
+      ageOver18Confirmed: status === "verified",
+      verifiedAt: status === "verified" ? new Date() : null
+    }
+  });
+  await auditLog(verification.userId, auditActions.verificationUpdate, {
+    provider: "stripe",
+    status,
+    reason: auditReason
+  });
+}
+
+async function handleStripeVerified(session: Stripe.Identity.VerificationSession) {
+  const dob = dobFromVerifiedOutputs(session);
+  if (!dob) {
+    await updateStripeVerification(session, "pending_age_review", "dob_unavailable");
+    return;
+  }
+  const age = calculateAge(dob);
+  await updateStripeVerification(session, age >= 18 ? "verified" : "failed", age >= 18 ? "age_over_18_confirmed" : "age_under_18");
+}
+
+export async function stripeVerificationWebhookHandler(req: Request, res: Response) {
+  let event: Stripe.Event;
+  try {
+    event = constructStripeWebhookEvent(req.body as Buffer, req.header("stripe-signature"));
+  } catch {
+    return res.status(400).json({ error: { message: "Invalid Stripe webhook signature" } });
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[api] Stripe verification webhook received", { eventType: event.type });
+  }
+
+  const session = event.data.object as Stripe.Identity.VerificationSession;
+  if (event.type === "identity.verification_session.verified") {
+    await handleStripeVerified(session);
+  } else if (event.type === "identity.verification_session.requires_input") {
+    await updateStripeVerification(session, "failed", "stripe_requires_input");
+  } else if (event.type === "identity.verification_session.canceled") {
+    await updateStripeVerification(session, "expired", "stripe_canceled");
+  }
+
+  return res.json({ received: true });
+}

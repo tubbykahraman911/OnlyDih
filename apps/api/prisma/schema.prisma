@@ -9,6 +9,7 @@ datasource db {
 
 enum VerificationState {
   pending
+  pending_age_review
   verified
   failed
   expired
