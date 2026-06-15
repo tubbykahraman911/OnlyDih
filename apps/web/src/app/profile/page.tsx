@@ -33,26 +33,27 @@ export default function ProfilePage() {
       <main className="mx-auto max-w-5xl px-4 py-8">
         <Panel>
           {!profile ? (
-            <p className="text-sm text-zinc-300">Loading profile...</p>
+            <p className="text-sm text-[#5f3f16]">Loading profile...</p>
           ) : (
             <>
+              <p className="kicker">Private profile</p>
               <h1 className="text-3xl font-semibold">{profile.username}</h1>
-              <p className="mt-2 text-sm text-zinc-300">Private profile only. Verification: {profile.verificationStatus}</p>
+              <p className="mt-2 text-sm text-[#5f3f16]">Private profile only. Verification: {profile.verificationStatus}</p>
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-md bg-zinc-950 p-4"><p className="text-sm text-zinc-400">Private analyses</p><p className="text-2xl font-semibold">{profile.privateAnalysisCount}</p></div>
-                <div className="rounded-md bg-zinc-950 p-4"><p className="text-sm text-zinc-400">Average score</p><p className="text-2xl font-semibold">{profile.averagePrivateScore?.toFixed(1) ?? "N/A"}</p></div>
-                <div className="rounded-md bg-zinc-950 p-4"><p className="text-sm text-zinc-400">Best score</p><p className="text-2xl font-semibold">{profile.bestPrivateScore?.toFixed(1) ?? "N/A"}</p></div>
+                <div className="rounded-md border border-[#d6a72f]/25 bg-white/60 p-4"><p className="text-sm text-[#7b6134]">Private analyses</p><p className="text-2xl font-semibold">{profile.privateAnalysisCount}</p></div>
+                <div className="rounded-md border border-[#d6a72f]/25 bg-white/60 p-4"><p className="text-sm text-[#7b6134]">Average score</p><p className="text-2xl font-semibold">{profile.averagePrivateScore?.toFixed(1) ?? "N/A"}</p></div>
+                <div className="rounded-md border border-[#d6a72f]/25 bg-white/60 p-4"><p className="text-sm text-[#7b6134]">Best score</p><p className="text-2xl font-semibold">{profile.bestPrivateScore?.toFixed(1) ?? "N/A"}</p></div>
               </div>
               <div className="mt-6 space-y-3">
                 <h2 className="text-xl font-semibold">Saved private results</h2>
-                {profile.savedPrivateResults.length === 0 ? <p className="text-sm text-zinc-300">No saved results yet.</p> : profile.savedPrivateResults.map((result) => (
-                  <Link key={result.id} href={`/results/${result.id}`} className="block rounded-md border border-white/10 bg-zinc-950 p-4 hover:border-emerald-300/40">
+                {profile.savedPrivateResults.length === 0 ? <p className="text-sm text-[#5f3f16]">No saved results yet.</p> : profile.savedPrivateResults.map((result) => (
+                  <Link key={result.id} href={`/results/${result.id}`} className="block rounded-md border border-[#d6a72f]/25 bg-white/60 p-4 hover:border-[#b7833a]">
                     <span className="font-medium">{result.totalScore.toFixed(1)} / 100</span>
-                    <span className="ml-3 text-sm text-zinc-400">{result.upload.originalFilename}</span>
+                    <span className="ml-3 text-sm text-[#7b6134]">{result.upload.originalFilename}</span>
                   </Link>
                 ))}
               </div>
-              <Link href="/delete-data" className="mt-6 inline-flex rounded-md border border-red-300/40 px-4 py-2 text-sm font-semibold text-red-100">
+              <Link href="/delete-data" className="danger-button mt-6">
                 Delete all my data
               </Link>
             </>

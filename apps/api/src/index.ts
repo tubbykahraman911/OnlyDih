@@ -16,6 +16,7 @@ import { healthRouter } from "./routes/health.js";
 import { requireAuth, requireCsrf } from "./middleware/auth.js";
 import { deleteExpiredRawUploads, startAnalysisWorker } from "./lib/analysisQueue.js";
 import { validateVerificationProviderConfig, verificationProviderDebugInfo } from "./lib/verificationProvider.js";
+import { aiProviderDebugInfo, validateAiProviderConfig } from "./lib/aiProvider.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 
@@ -23,13 +24,26 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(8080),
   HOST: z.string().default(process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
+  WEB_ORIGINS: z.string().optional(),
   SESSION_SECRET: z.string().min(24).default("dev-session-secret-change-before-production")
 });
 
 const env = envSchema.parse(process.env);
+const defaultLocalWebOrigins = process.env.NODE_ENV === "production" ? [] : ["http://127.0.0.1:3000", "http://localhost:3000"];
+const allowedWebOrigins = Array.from(
+  new Set(
+    [env.APP_BASE_URL, env.WEB_ORIGINS, ...defaultLocalWebOrigins]
+      .flatMap((value) => value?.split(",") ?? [])
+      .map((value) => value.trim())
+      .filter(Boolean)
+  )
+);
 validateVerificationProviderConfig();
+validateAiProviderConfig();
 if (process.env.NODE_ENV !== "production") {
   console.log("[api] verification provider", verificationProviderDebugInfo());
+  console.log("[api] ai provider", aiProviderDebugInfo());
+  console.log("[api] allowed web origins", allowedWebOrigins);
 }
 const app = express();
 
@@ -40,7 +54,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "blob:"],
-        connectSrc: ["'self'", env.APP_BASE_URL],
+        connectSrc: ["'self'", ...allowedWebOrigins],
         frameAncestors: ["'none'"]
       }
     }
@@ -48,7 +62,10 @@ app.use(
 );
 app.use(
   cors({
-    origin: env.APP_BASE_URL,
+    origin(origin, callback) {
+      if (!origin || allowedWebOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
     credentials: true
   })
 );

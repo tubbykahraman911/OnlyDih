@@ -6,17 +6,19 @@ import Link from "next/link";
 
 export function PhaseShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#101114] text-zinc-100">
-      <header className="border-b border-white/10 bg-[#101114]/95">
+    <div className="honey-shell">
+      <header className="sticky top-0 z-30 border-b border-[#d6a72f]/20 bg-[#fffdf8]/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Image src="/brand/onlydihs-logo.png" alt="" width={30} height={30} className="h-7 w-7 rounded-md" priority />
+          <Link href="/" className="flex items-center gap-3 text-lg font-semibold tracking-tight text-[#16120c]">
+            <span className="rounded-md border border-[#d6a72f]/35 bg-white p-1 shadow-sm">
+              <Image src="/brand/onlydihs-logo.png" alt="" width={30} height={30} className="h-7 w-7 rounded" priority />
+            </span>
             <span>OnlyDihs</span>
           </Link>
-          <nav className="flex items-center gap-3 text-sm text-zinc-300">
-            <Link href="/analyzer" className="hover:text-white">Analyzer</Link>
-            <Link href="/profile" className="hover:text-white">Profile</Link>
-            <Link href="/settings" className="hover:text-white">Settings</Link>
+          <nav className="flex items-center gap-2 text-sm text-[#5f3f16]">
+            <Link href="/analyzer" className="rounded-md px-3 py-2 hover:bg-[#d6a72f]/15">Analyzer</Link>
+            <Link href="/profile" className="rounded-md px-3 py-2 hover:bg-[#d6a72f]/15">Profile</Link>
+            <Link href="/settings" className="rounded-md px-3 py-2 hover:bg-[#d6a72f]/15">Settings</Link>
           </nav>
         </div>
       </header>
@@ -26,5 +28,5 @@ export function PhaseShell({ children }: { children: ReactNode }) {
 }
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-lg border border-white/10 bg-white/[0.04] p-5 ${className}`}>{children}</div>;
+  return <div className={`honey-panel ${className}`}>{children}</div>;
 }

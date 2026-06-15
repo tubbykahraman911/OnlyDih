@@ -2,52 +2,120 @@
 
 OnlyDihs Phase 1 is a private adult-only image analyzer MVP. It does not include livestreaming, public sharing, user matching, comments, DMs, public galleries, public profiles, leaderboards, battle mode, or sharing links.
 
-The safety model is intentionally strict:
-
-- Verified adults only.
-- Private upload only.
-- Private score only.
-- No anonymous or unverified uploads.
-- Every upload requires an explicit consent event.
-- Raw uploads use private S3-compatible storage and short-lived presigned PUT URLs.
-- Analyzer output is a private visual estimate, not a medical result or exact measurement.
+The safety model is intentionally strict: verified adults only, private upload only, private score only, explicit consent per upload, owner-only results, short-lived private upload URLs, audit logging, and user deletion controls.
 
 ## Apps
 
-- `apps/web`: Next.js App Router UI with Tailwind.
-- `apps/api`: Express API with Prisma, PostgreSQL, Redis/BullMQ, S3-compatible storage, cookie sessions, Zod validation, rate limits, audit logs, and private ownership checks.
-- `apps/ai-service`: optional FastAPI analyzer service with the same Phase 1 structured JSON contract; the API currently uses an internal placeholder worker.
+- `apps/web`: Next.js App Router frontend.
+- `apps/api`: Express TypeScript API with Prisma/Postgres, Redis/BullMQ, private S3/R2 storage, Stripe Identity, xAI/Grok analysis, cookie sessions, CSRF, rate limits, and ownership checks.
+- `apps/ai-service`: optional FastAPI analyzer reference service; production analysis is handled by `apps/api`.
 
-## Environment
+## Build Commands
 
-Copy `.env.example` and set real values:
+API:
 
 ```bash
-DATABASE_URL=
-REDIS_URL=
-S3_ENDPOINT=
-S3_REGION=
-S3_BUCKET=
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-SESSION_SECRET=
-VERIFICATION_PROVIDER=placeholder
-VERIFICATION_PROVIDER_API_KEY=
-VERIFICATION_WEBHOOK_SECRET=
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_IDENTITY_RETURN_URL=
-APP_BASE_URL=
+pnpm --filter @onlydihs/api build
+pnpm --filter @onlydihs/api start
+```
+
+Web:
+
+```bash
+pnpm --filter @onlydihs/web build
+```
+
+Database migrations:
+
+```bash
+pnpm --filter @onlydihs/api db:deploy
+```
+
+## Local API Env
+
+Use `apps/api/.env`:
+
+```bash
+NODE_ENV="development"
+PORT=8080
+HOST="127.0.0.1"
+APP_BASE_URL="http://localhost:3000"
+WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
+DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/onlydihs?schema=public"
+REDIS_URL="redis://localhost:6379"
+SESSION_SECRET="replace-with-at-least-24-random-characters"
+VERIFICATION_PROVIDER="placeholder"
+VERIFICATION_PROVIDER_API_KEY="placeholder"
+VERIFICATION_WEBHOOK_SECRET="replace-with-webhook-secret"
+STRIPE_SECRET_KEY=""
+STRIPE_IDENTITY_RESTRICTED_KEY=""
+STRIPE_WEBHOOK_SECRET=""
+STRIPE_IDENTITY_RETURN_URL="http://127.0.0.1:3000/verification"
+AI_PROVIDER="xai"
+XAI_API_KEY=""
+XAI_MODEL="grok-4.3"
+S3_ENDPOINT=""
+S3_REGION="auto"
+S3_BUCKET=""
+S3_ACCESS_KEY_ID=""
+S3_SECRET_ACCESS_KEY=""
 RAW_UPLOAD_RETENTION_HOURS=24
-NEXT_PUBLIC_API_BASE_URL=
+```
+
+Local uploads work without S3/R2 when the S3 variables are empty. Local xAI falls back to the placeholder analyzer when `XAI_API_KEY` is empty.
+
+## Production API Env
+
+Set these on Railway or Render:
+
+```bash
+NODE_ENV="production"
+PORT=8080
+DATABASE_URL="SUPABASE_POOLER_OR_DIRECT_DATABASE_URL"
+REDIS_URL="REDIS_URL_FROM_RAILWAY_RENDER_OR_UPSTASH"
+SESSION_SECRET="STRONG_RANDOM_SECRET"
+APP_BASE_URL="https://YOUR_VERCEL_WEB_DOMAIN"
+WEB_ORIGINS="https://YOUR_VERCEL_WEB_DOMAIN"
+VERIFICATION_PROVIDER="stripe"
+STRIPE_SECRET_KEY="sk_test_..."
+STRIPE_IDENTITY_RESTRICTED_KEY="rk_test_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+STRIPE_IDENTITY_RETURN_URL="https://YOUR_VERCEL_WEB_DOMAIN/verification"
+AI_PROVIDER="xai"
+XAI_API_KEY="xai_..."
+XAI_MODEL="grok-4.3"
+S3_ENDPOINT="https://ACCOUNT_ID.r2.cloudflarestorage.com"
+S3_REGION="auto"
+S3_BUCKET="onlydihs-private"
+S3_ACCESS_KEY_ID="..."
+S3_SECRET_ACCESS_KEY="..."
+RAW_UPLOAD_RETENTION_HOURS=24
+```
+
+`STRIPE_IDENTITY_RESTRICTED_KEY` is supported and preferred if you create a restricted Stripe key for Identity. If it is blank, the API uses `STRIPE_SECRET_KEY`.
+
+## Local Web Env
+
+Use `apps/web/.env.local`:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL="http://localhost:8080"
+```
+
+## Production Web Env
+
+Set this on Vercel:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL="https://YOUR_RAILWAY_OR_RENDER_API_DOMAIN"
 ```
 
 ## Local Development
 
 ```bash
 pnpm install
-pnpm --filter @onlydihs/api prisma:generate
-pnpm --filter @onlydihs/api prisma:push
+pnpm --filter @onlydihs/api db:generate
+pnpm --filter @onlydihs/api db:push
 pnpm --filter @onlydihs/api seed
 pnpm dev
 ```
@@ -57,38 +125,75 @@ Seeded verified account:
 - Email: `verified@onlydihs.local`
 - Password: `change-me-change-me`
 
-## Verification Placeholder
+## Production Deployment
 
-`POST /api/verification/start` creates a placeholder verification session. A real provider should replace this before launch. To simulate provider completion in development, call:
+1. Create a Supabase Postgres project and copy the production `DATABASE_URL`.
+2. Create Redis on Railway, Render, or Upstash and copy `REDIS_URL`.
+3. Create a private Cloudflare R2 bucket. Use the S3-compatible endpoint, region `auto`, bucket name, access key, and secret key.
+4. Create Stripe Identity test-mode keys. Add the API webhook endpoint after the API URL exists.
+5. Create an xAI API key.
+6. Deploy the API first.
+7. Run `pnpm --filter @onlydihs/api db:deploy` against the Supabase `DATABASE_URL`.
+8. Deploy the web app after the API URL is known.
+9. Add the Stripe webhook endpoint: `https://YOUR_API_DOMAIN/api/verification/stripe-webhook`.
+10. Set `STRIPE_WEBHOOK_SECRET` from Stripe, redeploy the API, then test end to end.
 
-```bash
-curl -X POST http://localhost:8080/api/verification/webhook \
-  -H "Content-Type: application/json" \
-  -H "x-verification-signature: replace-with-webhook-secret" \
-  -d '{"providerVerificationId":"SESSION_ID","status":"verified","ageOver18Confirmed":true}'
-```
+## Railway API Settings
 
-Uploads remain blocked unless the latest verification status is `verified` and `ageOver18Confirmed` is true.
+- Root directory: repo root.
+- Build command: `pnpm install --frozen-lockfile && pnpm --filter @onlydihs/api build && pnpm --filter @onlydihs/api db:deploy`
+- Start command: `pnpm --filter @onlydihs/api start`
+- Healthcheck path: `/healthz` or `/api/health`
+- Env: use the Production API Env block above.
+
+## Render API Settings
+
+- Root directory: repo root.
+- Runtime: Node.
+- Build command: `pnpm install --frozen-lockfile && pnpm --filter @onlydihs/api build && pnpm --filter @onlydihs/api db:deploy`
+- Start command: `pnpm --filter @onlydihs/api start`
+- Healthcheck path: `/healthz`
+- Env: use the Production API Env block above.
+
+## Vercel Web Settings
+
+- Root directory: repo root.
+- Framework preset: Next.js.
+- Install command: `pnpm install --frozen-lockfile`
+- Build command: `pnpm --filter @onlydihs/web build`
+- Output directory: `apps/web/.next`
+- Env: `NEXT_PUBLIC_API_BASE_URL`.
+
+## End-to-End Staging Test
+
+1. Visit the Vercel URL.
+2. Create an account or login.
+3. Start Stripe Identity verification in test mode and complete it with Stripe test documents.
+4. Confirm `/verification` changes to verified.
+5. Open `/analyzer`.
+6. Select a JPEG or PNG, check all consent boxes, and upload.
+7. Confirm the upload enters processing and completes.
+8. Open the private result page.
+9. Confirm the result is visible only while logged in as the owning user.
+10. Export data from Settings.
+11. Delete an individual analysis.
+12. Use Delete Account/Data in staging and confirm the account session ends.
 
 ## Stripe Identity
-
-Set `VERIFICATION_PROVIDER=stripe`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` to use Stripe Identity for new verification sessions. If `VERIFICATION_PROVIDER=stripe` is set but either Stripe secret is missing, the API fails clearly at startup instead of silently falling back to the placeholder provider.
-
-`STRIPE_IDENTITY_RETURN_URL` controls where Stripe redirects the browser after the hosted verification flow. If it is omitted, the API falls back to `${APP_BASE_URL}/verification`.
-
-`VERIFICATION_WEBHOOK_SECRET` is only for the placeholder development webhook at `/api/verification/webhook`. Stripe webhooks use `STRIPE_WEBHOOK_SECRET` at `/api/verification/stripe-webhook`.
 
 Stripe webhooks must be forwarded to:
 
 ```bash
-stripe listen --forward-to http://127.0.0.1:8080/api/verification/stripe-webhook
+https://YOUR_API_DOMAIN/api/verification/stripe-webhook
 ```
 
-Copy the resulting `whsec_...` value into `apps/api/.env` as `STRIPE_WEBHOOK_SECRET`, then restart the API. The app does not store government ID images or DOB; DOB is used only transiently in the webhook handler to confirm whether the verified person is 18+.
+The app does not store government ID images or DOB. DOB is used only transiently in the webhook handler to confirm whether the verified person is 18+.
 
-## Analyzer Contract
+## xAI/Grok Analyzer
 
-Analyzer responses must be structured JSON only:
+When `AI_PROVIDER="xai"` and `XAI_API_KEY` is present, the API worker reads the private upload server-side, sends it to xAI as a base64 data URL, requests structured JSON, validates the response with Zod, and saves only the private result for the authenticated owner.
+
+Analyzer responses must match:
 
 ```json
 {
@@ -104,7 +209,7 @@ Analyzer responses must be structured JSON only:
 }
 ```
 
-`total_score` uses the Phase 1 weights: length 35%, girth 30%, skin clarity 15%, presentation 10%, picture quality 5%, and confidence/calibration quality 5%. The service must not claim exact measurements unless a real calibration object or known reference scale is available.
+The analyzer must not claim exact real-world measurements unless a real calibration object or known reference scale is available.
 
 ## Compliance Notes
 

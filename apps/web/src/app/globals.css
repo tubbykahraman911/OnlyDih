@@ -3,11 +3,11 @@
 @tailwind utilities;
 
 :root {
-  --brand-champagne: #c5986f;
-  --brand-blush: #f4afb0;
-  --brand-gold: #d7b355;
-  --brand-white: #fefefe;
-  --brand-night: #110d0c;
+  --brand-white: #fffdf8;
+  --brand-gold: #d6a72f;
+  --brand-antique-honey: #b7833a;
+  --brand-honey-dark: #5f3f16;
+  --brand-ink: #16120c;
 }
 
 html,
@@ -16,12 +16,53 @@ body {
 }
 
 body {
-  background: linear-gradient(180deg, #110d0c 0%, #15110f 48%, #110d0c 100%);
-  color: rgba(254, 254, 254, 0.94);
+  background:
+    linear-gradient(120deg, rgba(214, 167, 47, 0.18), transparent 34%),
+    linear-gradient(240deg, rgba(183, 131, 58, 0.16), transparent 36%),
+    linear-gradient(180deg, #fffdf8 0%, #fbf1da 52%, #fffaf0 100%);
+  color: var(--brand-ink);
 }
 
 ::selection {
-  background: rgba(244, 175, 176, 0.32);
-  color: var(--brand-white);
+  background: rgba(214, 167, 47, 0.34);
+  color: var(--brand-ink);
+}
+
+@layer components {
+  .honey-shell {
+    @apply min-h-screen text-[#16120c];
+    background:
+      radial-gradient(900px circle at 15% 0%, rgba(214, 167, 47, 0.22), transparent 45%),
+      radial-gradient(900px circle at 92% 8%, rgba(183, 131, 58, 0.18), transparent 45%),
+      linear-gradient(180deg, #fffdf8 0%, #fbf1da 58%, #fffaf0 100%);
+  }
+
+  .honey-panel {
+    @apply rounded-lg border border-[#d6a72f]/30 bg-white/75 p-5 shadow-[0_22px_70px_rgba(95,63,22,0.12)] backdrop-blur;
+  }
+
+  .gold-button {
+    @apply inline-flex items-center justify-center rounded-md border border-[#b7833a]/20 bg-[#d6a72f] px-4 py-2 text-sm font-semibold text-[#16120c] shadow-[0_10px_26px_rgba(183,131,58,0.24)] transition hover:bg-[#e2b93f] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .honey-button {
+    @apply inline-flex items-center justify-center rounded-md border border-[#b7833a]/35 bg-white/65 px-4 py-2 text-sm font-semibold text-[#5f3f16] transition hover:border-[#d6a72f] hover:bg-white;
+  }
+
+  .danger-button {
+    @apply inline-flex items-center justify-center rounded-md border border-red-300/70 bg-white/70 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .honey-input {
+    @apply mt-1 w-full rounded-md border border-[#d6a72f]/30 bg-white/80 px-3 py-2 text-[#16120c] outline-none transition placeholder:text-[#8a6d3f] focus:border-[#b7833a] focus:ring-2 focus:ring-[#d6a72f]/25;
+  }
+
+  .kicker {
+    @apply text-sm font-semibold uppercase tracking-[0.18em] text-[#b7833a];
+  }
+
+  .privacy-ribbon {
+    @apply rounded-md border border-[#d6a72f]/30 bg-[#fff8e6] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5f3f16];
+  }
 }
 

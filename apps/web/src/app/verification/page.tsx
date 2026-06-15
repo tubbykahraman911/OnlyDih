@@ -61,25 +61,30 @@ export default function VerificationPage() {
     <PhaseShell>
       <main className="mx-auto max-w-3xl px-4 py-12">
         <Panel>
-          <p className="text-sm font-medium uppercase tracking-[0.18em] text-emerald-300">Verification gate</p>
+          <p className="kicker">Verification gate</p>
           <h1 className="mt-3 text-3xl font-semibold">18+ verification status</h1>
-          <p className="mt-4 text-zinc-300">
-            Current status: <span className="font-semibold text-white">{status?.status ?? "loading"}</span>
+          <p className="mt-4 text-[#5f3f16]">
+            Current status: <span className="font-semibold text-[#16120c]">{status?.status ?? "loading"}</span>
           </p>
-          {statusMessage && <p className="mt-3 rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{statusMessage}</p>}
+          {statusMessage && <p className="mt-3 rounded-md border border-[#d6a72f]/35 bg-[#fff8e6] p-3 text-sm text-[#5f3f16]">{statusMessage}</p>}
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            {["ID provider session", "18+ confirmation", "Analyzer unlock"].map((item) => (
+              <div key={item} className="rounded-md border border-[#d6a72f]/25 bg-white/60 p-3 text-sm font-semibold text-[#5f3f16]">{item}</div>
+            ))}
+          </div>
           <div className="mt-6 flex flex-wrap gap-3">
             {!verified && (
-              <button onClick={() => void start()} className="rounded-md bg-emerald-300 px-4 py-2 text-sm font-semibold text-zinc-950">
+              <button onClick={() => void start()} className="gold-button">
                 Start verification
               </button>
             )}
             {verified && (
-              <Link href="/analyzer" className="rounded-md bg-emerald-300 px-4 py-2 text-sm font-semibold text-zinc-950">
+              <Link href="/analyzer" className="gold-button">
                 Open analyzer
               </Link>
             )}
           </div>
-          {message && <p className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm text-zinc-300">{message}</p>}
+          {message && <p className="mt-5 rounded-md border border-[#d6a72f]/25 bg-white/60 p-3 text-sm text-[#5f3f16]">{message}</p>}
         </Panel>
       </main>
     </PhaseShell>

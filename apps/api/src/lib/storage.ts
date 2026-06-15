@@ -1,7 +1,7 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z } from "zod";
 
@@ -74,6 +74,20 @@ export async function deletePrivateObject(key: string) {
   }
   const { env, client } = getStorage();
   await client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+}
+
+export async function readPrivateObject(key: string) {
+  if (canUseLocalUploadFallback()) {
+    return readFile(localPathForStorageKey(key));
+  }
+  const { env, client } = getStorage();
+  const response = await client.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+  if (!response.Body) throw new Error("Private object was empty");
+  const chunks: Buffer[] = [];
+  for await (const chunk of response.Body as NodeJS.ReadableStream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 export function localPathForStorageKey(key: string) {

@@ -2,7 +2,7 @@ import { Queue, Worker } from "bullmq";
 import { prisma } from "../db/prisma.js";
 import { auditActions, auditLog } from "./audit.js";
 import { deletePrivateObject } from "./storage.js";
-import { runPlaceholderAnalyzer, runPlaceholderModeration } from "./analyzer.js";
+import { AnalyzerProviderError, runAnalyzer, runPlaceholderModeration } from "./analyzer.js";
 
 const queueName = "private-analysis";
 let queue: Queue<{ uploadId: string }> | null = null;
@@ -81,8 +81,18 @@ export async function processUpload(uploadId: string) {
   await prisma.upload.update({ where: { id: upload.id }, data: { moderationStatus: "approved" } });
   await auditLog(upload.userId, auditActions.moderationCompleted, { uploadId: upload.id, moderation });
 
-  // TODO: Strip image metadata before any real analyzer provider receives raw bytes.
-  const result = await runPlaceholderAnalyzer();
+  let result;
+  try {
+    // TODO: Strip image metadata before any real analyzer provider receives raw bytes.
+    result = await runAnalyzer(upload);
+  } catch (error) {
+    await prisma.upload.update({ where: { id: upload.id }, data: { status: "failed" } });
+    await auditLog(upload.userId, "analysis_failed", {
+      uploadId: upload.id,
+      reason: error instanceof AnalyzerProviderError ? error.message : "Private analysis failed safely."
+    });
+    return;
+  }
   await prisma.analysisResult.upsert({
     where: { uploadId: upload.id },
     create: {

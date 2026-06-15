@@ -21,7 +21,8 @@ function envValue(key: string) {
 
 export function validateVerificationProviderConfig() {
   if (process.env.VERIFICATION_PROVIDER === "stripe") {
-    const missing = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"].filter((key) => !envValue(key));
+    const missing = ["STRIPE_WEBHOOK_SECRET"].filter((key) => !envValue(key));
+    if (!envValue("STRIPE_IDENTITY_RESTRICTED_KEY") && !envValue("STRIPE_SECRET_KEY")) missing.unshift("STRIPE_IDENTITY_RESTRICTED_KEY or STRIPE_SECRET_KEY");
     if (missing.length) {
       throw new Error(
         `VERIFICATION_PROVIDER=stripe requires ${missing.join(", ")}. Add them to apps/api/.env or use VERIFICATION_PROVIDER=placeholder for local placeholder verification.`
@@ -33,7 +34,7 @@ export function validateVerificationProviderConfig() {
 let stripeClient: Stripe | null = null;
 
 export function getStripeClient() {
-  const secretKey = envValue("STRIPE_SECRET_KEY");
+  const secretKey = envValue("STRIPE_IDENTITY_RESTRICTED_KEY") ?? envValue("STRIPE_SECRET_KEY");
   if (!secretKey) return null;
   stripeClient ??= new Stripe(secretKey);
   return stripeClient;
@@ -43,6 +44,7 @@ export function verificationProviderDebugInfo() {
   return {
     provider: activeVerificationProvider(),
     stripeSecretKeyPresent: Boolean(envValue("STRIPE_SECRET_KEY")),
+    stripeIdentityRestrictedKeyPresent: Boolean(envValue("STRIPE_IDENTITY_RESTRICTED_KEY")),
     stripeWebhookSecretPresent: Boolean(envValue("STRIPE_WEBHOOK_SECRET")),
     stripeIdentityReturnUrlPresent: Boolean(envValue("STRIPE_IDENTITY_RETURN_URL")),
     placeholderWebhookSecretPresent: Boolean(envValue("VERIFICATION_WEBHOOK_SECRET"))

@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "db:generate": "pnpm --filter @onlydihs/api exec prisma generate",
     "db:migrate": "pnpm --filter @onlydihs/api exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @onlydihs/api exec prisma migrate deploy",
     "db:studio": "pnpm --filter @onlydihs/api exec prisma studio",
     "db:push": "pnpm --filter @onlydihs/api exec prisma db push"
   },
