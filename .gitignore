@@ -10,7 +10,6 @@ coverage
 .env.*.local
 !.env.example
 *.log
-pnpm-lock.yaml
 *.tsbuildinfo
 __pycache__/
 *.py[cod]
