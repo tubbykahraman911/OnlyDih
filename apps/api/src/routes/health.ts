@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db/prisma.js";
+import { logDatabaseFailureDiagnostic } from "../lib/databaseDiagnostics.js";
 
 export const healthRouter = Router();
 
@@ -24,7 +25,10 @@ healthRouter.get("/", async (_req, res) => {
       database: { ok: true }
     });
     return res.json(response);
-  } catch {
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") {
+      logDatabaseFailureDiagnostic(error);
+    }
     const response = responseSchema.parse({
       ok: false,
       service: "onlydihs-api",

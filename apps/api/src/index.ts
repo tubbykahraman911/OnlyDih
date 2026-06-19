@@ -17,6 +17,7 @@ import { requireAuth, requireCsrf } from "./middleware/auth.js";
 import { deleteExpiredRawUploads, startAnalysisWorker } from "./lib/analysisQueue.js";
 import { validateVerificationProviderConfig, verificationProviderDebugInfo } from "./lib/verificationProvider.js";
 import { aiProviderDebugInfo, validateAiProviderConfig } from "./lib/aiProvider.js";
+import { logDatabaseStartupDiagnostic } from "./lib/databaseDiagnostics.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 
@@ -40,6 +41,7 @@ const allowedWebOrigins = Array.from(
 );
 validateVerificationProviderConfig();
 validateAiProviderConfig();
+logDatabaseStartupDiagnostic();
 if (process.env.NODE_ENV !== "production") {
   console.log("[api] verification provider", verificationProviderDebugInfo());
   console.log("[api] ai provider", aiProviderDebugInfo());
