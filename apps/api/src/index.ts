@@ -41,7 +41,9 @@ const allowedWebOrigins = Array.from(
 );
 validateVerificationProviderConfig();
 validateAiProviderConfig();
-logDatabaseStartupDiagnostic();
+if (process.env.NODE_ENV === "production") {
+  logDatabaseStartupDiagnostic();
+}
 if (process.env.NODE_ENV !== "production") {
   console.log("[api] verification provider", verificationProviderDebugInfo());
   console.log("[api] ai provider", aiProviderDebugInfo());
